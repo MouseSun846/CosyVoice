@@ -98,7 +98,33 @@ class CosyVoice:
                 logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
                 yield model_output
                 start_time = time.time()
-
+    def stream(self, tts_text, prompt_text, prompt_speech_16k):
+        prompt_text = self.frontend.text_normalize(prompt_text, split=False, text_frontend=True)
+        for i in tqdm(self.frontend.text_normalize(tts_text, split=True, text_frontend=True)):
+            model_input = self.frontend.frontend_zero_shot(i, prompt_text, prompt_speech_16k, self.sample_rate)
+            for model_output in self.model.tts(**model_input, stream=True, speed=1.0):                
+                tts_speech_chunk = model_output['tts_speech']
+                yield tts_speech_chunk
+    def stream_batch(self, tts_text, prompt_text, prompt_speech_16k, batch_size=3):
+        prompt_text = self.frontend.text_normalize(prompt_text, split=False, text_frontend=True)
+        text_segments = list(self.frontend.text_normalize(tts_text, split=True, text_frontend=True))
+    
+        # 批量处理文本段
+        for i in range(0, len(text_segments), batch_size):
+            batch = text_segments[i:i + batch_size]
+            batch_inputs = [
+                self.frontend.frontend_zero_shot(
+                segment, 
+                prompt_text, 
+                prompt_speech_16k, 
+                self.sample_rate
+            ) for segment in batch
+        ]
+        
+            # 批量生成音频
+            for inputs in batch_inputs:
+                for model_output in self.model.tts(**inputs, stream=True, speed=1.0):
+                    yield model_output['tts_speech']                        
     def inference_instruct(self, tts_text, spk_id, instruct_text, stream=False, speed=1.0, text_frontend=True):
         assert isinstance(self.model, CosyVoiceModel), 'inference_instruct is only implemented for CosyVoice!'
         if self.instruct is False:
